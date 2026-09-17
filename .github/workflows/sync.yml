@@ -3,7 +3,7 @@ name: Sync SPX Outbound
 on:
   schedule:
     # Chạy mỗi 30 phút (giờ UTC). SPX ở giờ VN (UTC+7) nên tự quy đổi nếu cần giới hạn khung giờ.
-    - cron: "*/30 * * * *"
+    - cron: "15,45 * * * *"
   workflow_dispatch: {}   # cho phép bấm "Run workflow" thủ công trên GitHub để test
 
 jobs:
