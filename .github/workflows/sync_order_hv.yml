@@ -2,7 +2,7 @@ name: Sync Order HV
 
 on:
   schedule:
-    - cron: "*/30 * * * *"   # mỗi 30 phút, chỉnh lại nếu cần
+    - cron: "15,45 * * * *"   # mỗi 30 phút, chỉnh lại nếu cần
   workflow_dispatch: {}      # cho phép bấm Run workflow thủ công để test
 
 jobs:
