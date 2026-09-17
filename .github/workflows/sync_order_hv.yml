@@ -1,0 +1,27 @@
+name: Sync Order HV
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"   # mỗi 30 phút, chỉnh lại nếu cần
+  workflow_dispatch: {}      # cho phép bấm Run workflow thủ công để test
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run sync_order_hv.py
+        env:
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: python sync_order_hv.py
