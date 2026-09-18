@@ -36,7 +36,7 @@ CONFIG = {
     "COOKIE_SHEET": "Cookie",
     "COOKIE_CELL": "B1",
     "OUTPUT_SHEET": "Order HV",
-    "API_URL": "https://spx.shopee.vn/api/fleet_order/order/tracking_list/search",
+    "API_URL": "https://spx.shopee.vn/api/admin/order/soc/tracking/list",
 
     "PAGE_SIZE": 500,
     "MAX_PAGES": 10,
