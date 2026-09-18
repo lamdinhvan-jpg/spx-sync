@@ -38,9 +38,9 @@ CONFIG = {
     "OUTPUT_SHEET": "Order HV",
     "API_URL": "https://spx.shopee.vn/api/fleet_order/order/tracking_list/search",
 
-    "PAGE_SIZE": 2000,
-    "MAX_PAGES": 5,
-    "SLEEP_SEC": 3.0,      # SLEEP_MS = 2000
+    "PAGE_SIZE": 500,
+    "MAX_PAGES": 10,
+    "SLEEP_SEC": 2.0,     
     "MAX_RETRY": 8,
 }
 
