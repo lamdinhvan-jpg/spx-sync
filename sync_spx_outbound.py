@@ -172,7 +172,7 @@ def format_data_range(sh, last_row):
 def set_last_update(ss):
     sh = ss.worksheet(COOKIE_SHEET_NAME)
     now_str = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-    sh.update_acell("B3", now_str)
+    sh.update_acell("B4", now_str)
 
 
 # ============================== SPX API ==============================
