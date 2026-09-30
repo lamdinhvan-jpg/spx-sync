@@ -1,14 +1,19 @@
 """
-Sync SPX Outbound (High Value) -> Google Sheet
+Sync SPX Outbound (High Value + DG Type 4) -> Google Sheet
 Bản chuyển đổi từ Google Apps Script sang Python.
 
 Yêu cầu:
     pip install requests gspread google-auth
 
-Biến môi trường cần thiết (xem README_SETUP.md để biết cách tạo):
+Biến môi trường cần thiết:
     SPREADSHEET_ID              - ID của Google Sheet
     GOOGLE_SERVICE_ACCOUNT_JSON - đường dẫn tới file service-account.json
                                    (hoặc nội dung JSON trực tiếp, script tự nhận diện)
+
+Luồng chạy:
+    1. Gọi high_value=1 lần lượt với status 2, 10, 11, 4, 5
+    2. Gọi dg_type=4   lần lượt với status 2, 10, 11, 4, 5
+    3. Ghép dữ liệu, trùng to_number thì bỏ (giữ dòng lấy được trước)
 """
 
 import json
@@ -29,13 +34,18 @@ COOKIE_SHEET_NAME = "Cookie"
 PAGE_SIZE = 1000
 MAX_PAGES = 7
 SLEEP_SEC = 2.0                 # nghỉ giữa các page CÙNG status
-STATUS_SLEEP_SEC = 3.0          # nghỉ giữa các status khác nhau
+STATUS_SLEEP_SEC = 3.0          # nghỉ giữa các lượt gọi khác nhau
 MAX_RETRY = 10
 MAX_BACKOFF_SEC = 30.0
-RETRY_FAILED_STATUSES = True    # thử lại 1 vòng riêng cho status bị lỗi, sau khi chạy hết
-HIGH_VALUE_FILTER = 1
+RETRY_FAILED_STATUSES = True    # thử lại 1 vòng riêng cho tác vụ bị lỗi, sau khi chạy hết
 DAYS_BACK = 6
 STATUS_FILTERS = [2, 10, 11, 4, 5]
+
+# Thứ tự chạy: HV trước, DG sau. Dòng trùng to_number ở lượt sau sẽ bị bỏ.
+FILTER_JOBS = [
+    {"name": "HV=1", "params": {"high_value": 1}},
+    {"name": "DG=4", "params": {"dg_type": 4}},
+]
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -205,16 +215,19 @@ def fetch_outbound_with_retry(url, cookie, session):
 
 def fetch_outbound_list_filtered(
     page, count, ctime_start, ctime_end, complete_start, complete_end,
-    high_value, status_filter, cookie, session
+    extra_params, status_filter, cookie, session
 ):
     query = (
         f"pageno={page}&count={count}"
         f"&ctime={ctime_start},{ctime_end}"
         f"&complete_time={complete_start},{complete_end}"
-        f"&high_value={high_value}&status={status_filter}"
+        f"&status={status_filter}"
     )
+    for k, v in extra_params.items():
+        query += f"&{k}={v}"
+
     url = f"{SPX_BASE_URL}?{query}"
-    log(f"Đang gọi Status {status_filter} - page {page}")
+    log(f"Đang gọi {extra_params} | Status {status_filter} - page {page}")
 
     resp = fetch_outbound_with_retry(url, cookie, session)
     if resp is None:
@@ -222,7 +235,7 @@ def fetch_outbound_list_filtered(
 
     code = resp.status_code
     text = resp.text
-    log(f"HTTP code Status {status_filter} - page {page}: {code}")
+    log(f"HTTP code {extra_params} | Status {status_filter} - page {page}: {code}")
 
     if code == 401:
         raise RuntimeError("401 Unauthorized - Cookie sai hoặc hết hạn")
@@ -334,10 +347,11 @@ def map_row(it):
 
 # ============================== MAIN SYNC LOGIC ==============================
 def fetch_all_pages_for_status(
-    status_filter, ctime_start, ctime_end, complete_start, complete_end,
+    job_name, extra_params, status_filter,
+    ctime_start, ctime_end, complete_start, complete_end,
     cookie, session, all_rows, seen_to_numbers
 ):
-    log(f"===== Bắt đầu lấy Status = {status_filter} =====")
+    log(f"===== [{job_name}] Bắt đầu lấy Status = {status_filter} =====")
     fetched = 0
     total = 0
     failed = False
@@ -346,16 +360,16 @@ def fetch_all_pages_for_status(
         try:
             result = fetch_outbound_list_filtered(
                 page, PAGE_SIZE, ctime_start, ctime_end, complete_start, complete_end,
-                HIGH_VALUE_FILTER, status_filter, cookie, session,
+                extra_params, status_filter, cookie, session,
             )
         except Exception as e:
-            log(f"Lỗi Status {status_filter} - page {page}: {e}")
+            log(f"Lỗi [{job_name}] Status {status_filter} - page {page}: {e}")
             failed = True
             break
 
         lst = result.get("list", [])
         total = result.get("total") or total
-        log(f"Status {status_filter} | Page {page}: {len(lst)} | api_total={result.get('total', 0)}")
+        log(f"[{job_name}] Status {status_filter} | Page {page}: {len(lst)} | api_total={result.get('total', 0)}")
 
         if not lst:
             break
@@ -387,41 +401,46 @@ def sync_spx_outbound_hvY_to_ob():
 
     log(f"ctime={ctime_start},{ctime_end}")
     log(f"complete_time={complete_start},{complete_end}")
-    log(f"high_value={HIGH_VALUE_FILTER}")
     log(f"status={','.join(map(str, STATUS_FILTERS))}")
+    log(f"jobs={[j['name'] for j in FILTER_JOBS]}")
 
     all_rows = []
     total_fetched = 0
     seen_to_numbers = {}
-    failed_statuses = []
+    failed_tasks = []   # danh sách (job, status) bị lỗi
 
     session = requests.Session()
 
-    for i, status_filter in enumerate(STATUS_FILTERS):
+    # Thứ tự: HV (5 status) -> DG (5 status)
+    tasks = [(job, st) for job in FILTER_JOBS for st in STATUS_FILTERS]
+
+    for i, (job, status_filter) in enumerate(tasks):
         r = fetch_all_pages_for_status(
-            status_filter, ctime_start, ctime_end, complete_start, complete_end,
+            job["name"], job["params"], status_filter,
+            ctime_start, ctime_end, complete_start, complete_end,
             cookie, session, all_rows, seen_to_numbers,
         )
         total_fetched += r["fetched"]
         if r["failed"]:
-            failed_statuses.append(status_filter)
+            failed_tasks.append((job, status_filter))
 
-        if i < len(STATUS_FILTERS) - 1:
+        if i < len(tasks) - 1:
             time.sleep(STATUS_SLEEP_SEC + random.uniform(0, 1.0))
 
-    if RETRY_FAILED_STATUSES and failed_statuses:
-        log(f"Sẽ thử lại các status bị lỗi: {failed_statuses}")
+    if RETRY_FAILED_STATUSES and failed_tasks:
+        log(f"Sẽ thử lại: {[(j['name'], s) for j, s in failed_tasks]}")
         time.sleep(15 + random.uniform(0, 5))
         still_failed = []
-        for i, status_filter in enumerate(failed_statuses):
+        for i, (job, status_filter) in enumerate(failed_tasks):
             r = fetch_all_pages_for_status(
-                status_filter, ctime_start, ctime_end, complete_start, complete_end,
+                job["name"], job["params"], status_filter,
+                ctime_start, ctime_end, complete_start, complete_end,
                 cookie, session, all_rows, seen_to_numbers,
             )
             total_fetched += r["fetched"]
             if r["failed"]:
-                still_failed.append(status_filter)
-            if i < len(failed_statuses) - 1:
+                still_failed.append((job["name"], status_filter))
+            if i < len(failed_tasks) - 1:
                 time.sleep(STATUS_SLEEP_SEC + random.uniform(0, 1.0))
         if still_failed:
             log(f"Vẫn lỗi sau khi thử lại: {still_failed}")
@@ -448,6 +467,7 @@ def sync_spx_outbound_hvY_to_ob():
 
     log(
         f"Done: fetched={total_fetched} | unique_written={total_written} | "
+        f"jobs={','.join(j['name'] for j in FILTER_JOBS)} | "
         f"statuses={','.join(map(str, STATUS_FILTERS))}"
     )
 
