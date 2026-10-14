@@ -3,7 +3,7 @@ Sync SPX Outbound (High Value + DG Type 4) -> Google Sheet
 Bản chuyển đổi từ Google Apps Script sang Python.
 
 Yêu cầu:
-    pip install requests gspread google-auth
+    pip install requests gspread google-auth tzdata
 
 Biến môi trường cần thiết:
     SPREADSHEET_ID              - ID của Google Sheet
@@ -14,6 +14,10 @@ Luồng chạy:
     1. Gọi high_value=1 lần lượt với status 2, 10, 11, 4, 5
     2. Gọi dg_type=4   lần lượt với status 2, 10, 11, 4, 5
     3. Ghép dữ liệu, trùng to_number thì bỏ (giữ dòng lấy được trước)
+
+Lưu ý múi giờ:
+    Mọi thời gian hiển thị đều dùng múi giờ Asia/Ho_Chi_Minh (UTC+7),
+    không phụ thuộc múi giờ của máy chạy (GitHub Actions runner mặc định UTC).
 """
 
 import json
@@ -21,12 +25,15 @@ import os
 import random
 import time
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import gspread
 import requests
 from google.oauth2.service_account import Credentials
 
 # ============================== CONFIG ==============================
+TZ = ZoneInfo("Asia/Ho_Chi_Minh")   # múi giờ Việt Nam (UTC+7)
+
 SPX_BASE_URL = "https://spx.shopee.vn/api/in-station/general_to/outbound/search"
 SHEET_NAME = "HV pack"
 COOKIE_SHEET_NAME = "Cookie"
@@ -81,7 +88,7 @@ HEADER_ROW = [
 
 
 def log(msg):
-    ts = datetime.now().strftime("%H:%M:%S")
+    ts = datetime.now(TZ).strftime("%H:%M:%S")
     print(f"{ts}  {msg}", flush=True)
 
 
@@ -181,7 +188,7 @@ def format_data_range(sh, last_row):
 
 def set_last_update(ss):
     sh = ss.worksheet(COOKIE_SHEET_NAME)
-    now_str = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    now_str = datetime.now(TZ).strftime("%d/%m/%Y %H:%M:%S")
     sh.update_acell("B4", now_str)
 
 
@@ -263,11 +270,12 @@ def to_kg(w):
 
 
 def to_date_str(sec):
+    """Đổi epoch giây -> chuỗi dd/MM/yyyy HH:mm:ss theo giờ Việt Nam."""
     try:
         n = float(sec)
         if n > 0:
-            return datetime.fromtimestamp(n).strftime("%d/%m/%Y %H:%M:%S")
-    except (TypeError, ValueError):
+            return datetime.fromtimestamp(n, tz=TZ).strftime("%d/%m/%Y %H:%M:%S")
+    except (TypeError, ValueError, OverflowError, OSError):
         pass
     return ""
 
